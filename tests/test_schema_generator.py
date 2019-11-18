@@ -7,16 +7,16 @@ from django.conf.urls import url
 from django.contrib.postgres import fields as postgres_fields
 from django.db import models
 from django.utils.inspect import get_func_args
+from django_fake_model import models as fake_models
 from rest_framework import routers, serializers, viewsets
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from django_fake_model import models as fake_models
 from drf_yasg import codecs, openapi
-from drf_yasg.codecs import yaml_sane_load
+from drf_yasg.codecs import yaml_sane_dump, yaml_sane_load
 from drf_yasg.errors import SwaggerGenerationError
 from drf_yasg.generators import OpenAPISchemaGenerator
-from drf_yasg.utils import swagger_auto_schema
+from drf_yasg.utils import run_validators, swagger_auto_schema
 
 try:
     import typing
@@ -24,11 +24,11 @@ except ImportError:
     typing = None
 
 
-def test_schema_is_valid(swagger, codec_yaml):
-    codec_yaml.encode(swagger)
+def test_schema_is_valid(swagger):
+    run_validators(swagger, ['ssv', 'flex'])
 
 
-def test_invalid_schema_fails(codec_json, mock_schema_request):
+def test_invalid_schema_fails(mock_schema_request):
     # noinspection PyTypeChecker
     bad_generator = OpenAPISchemaGenerator(
         info=openapi.Info(
@@ -40,24 +40,23 @@ def test_invalid_schema_fails(codec_json, mock_schema_request):
 
     swagger = bad_generator.get_schema(mock_schema_request, True)
     with pytest.raises(codecs.SwaggerValidationError):
-        codec_json.encode(swagger)
+        run_validators(swagger, ['ssv', 'flex'])
 
 
-def test_json_codec_roundtrip(codec_json, swagger, validate_schema):
-    json_bytes = codec_json.encode(swagger)
-    validate_schema(json.loads(json_bytes.decode('utf-8')))
+def test_json_codec_roundtrip(swagger, validate_schema):
+    validate_schema(json.loads(json.dumps(swagger)))
 
 
-def test_yaml_codec_roundtrip(codec_yaml, swagger, validate_schema):
-    yaml_bytes = codec_yaml.encode(swagger)
+def test_yaml_codec_roundtrip(swagger, validate_schema):
+    yaml_bytes = yaml_sane_dump(swagger, True)
     assert b'omap' not in yaml_bytes  # ensure no ugly !!omap is outputted
     assert b'&id' not in yaml_bytes and b'*id' not in yaml_bytes  # ensure no YAML references are generated
     validate_schema(yaml_sane_load(yaml_bytes.decode('utf-8')))
 
 
-def test_yaml_and_json_match(codec_yaml, codec_json, swagger):
-    yaml_schema = yaml_sane_load(codec_yaml.encode(swagger).decode('utf-8'))
-    json_schema = json.loads(codec_json.encode(swagger).decode('utf-8'), object_pairs_hook=OrderedDict)
+def test_yaml_and_json_match(swagger):
+    yaml_schema = yaml_sane_load(yaml_sane_dump(swagger, False))
+    json_schema = json.loads(json.dumps(swagger), object_pairs_hook=OrderedDict)
     assert yaml_schema == json_schema
 
 
@@ -346,6 +345,7 @@ EXPECTED_DESCRIPTION = """\
 
     You can log in using the pre-existing `admin` user with password `passwordadmin`.
 """
+
 
 def test_multiline_strings(call_generate_swagger):
     output = call_generate_swagger(format='yaml')
